@@ -1,7 +1,11 @@
 {
   "name": "nagi-vault",
   "private": true,
-  "workspaces": ["api", "web", "infra"],
+  "workspaces": [
+    "api",
+    "web",
+    "infra"
+  ],
   "scripts": {
     "build": "npm run build -w web",
     "test": "npm test -w api",

@@ -262,7 +262,7 @@ Phase 0 の項目はすべて完了した。Phase 1 で反映すること：
 | Lambda のログに保管庫の中身・トークン・署名付き URL・ETag が出ていない | OK（実際の利用後の 178 行を確認。出ているのは Lambda 自身の START/END/REPORT と、`level / sub / method / path / status / bytes / ms / error` だけ） |
 | MFA（TOTP）が実際に求められている | OK（CloudTrail で、パスワードでのログイン `login_POST` の直後に毎回 `mfa_totp_POST` がある）。ただし `admin-get-user` の `UserMFASettingList` には表示されない |
 | ログイン画面で CSP 違反が出ない | OK（ログイン前の画面） |
-| ログイン後の操作で CSP 違反が出ない | 利用者の操作で確認する（マスターパスワードは利用者だけが扱う）。なお、本番の画面で保管庫の作成・保存が成功しているので、WebAssembly（Argon2）と S3 への直接通信は CSP で妨げられていない |
+| ログイン後の操作で CSP 違反が出ない | OK（利用者が開発者ツールのコンソールで確認。ログイン → 保管庫を開く → 編集 → 保存 → ダウンロードで CSP のエラーなし） |
 | 利用者の追加手順、バックアップ・復元手順 | `docs/operations.md` にまとめた |
 
 想定と違った点：

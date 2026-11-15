@@ -239,10 +239,24 @@ function estimatedSize() {
   return state.size + state.addedSinceSerialize;
 }
 
+/** 直前に描いた項目（同じ項目を描き直すときだけ、編集欄のスクロール位置を保つ） */
+let renderedEntry: K.KdbxEntry | null = null;
+
 function renderMain() {
   const db = state.db;
   if (!db) return;
+  // 画面を作り直すとスクロール位置が先頭に戻るので、一覧と編集欄の位置を覚えておいて戻す
+  const listScroll = root.querySelector('.list')?.scrollTop ?? 0;
+  const editorScroll = root.querySelector('.editor')?.scrollTop ?? 0;
+  const sameEntry = renderedEntry === state.selected;
+
   show(h('div', { class: 'layout' }, renderHeader(), state.message ? h('p', { class: `msg ${state.message.kind}` }, state.message.text) : null, h('div', { class: 'body' }, renderList(db), renderEditor(db))));
+
+  renderedEntry = state.selected;
+  root.querySelector('.list')!.scrollTop = listScroll;
+  if (sameEntry) root.querySelector('.editor')!.scrollTop = editorScroll;
+  // 選んだ項目（追加した項目を含む）が見えていなければ、見える位置までだけ動かす
+  root.querySelector('.entry.selected')?.scrollIntoView({ block: 'nearest' });
 }
 
 function renderHeader() {

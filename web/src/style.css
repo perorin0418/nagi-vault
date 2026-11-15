@@ -89,6 +89,8 @@ label.check { display: flex; gap: 6px; align-items: center; color: var(--text); 
 .list ul { list-style: none; margin: 0; padding: 0 8px 12px; }
 .entry { width: 100%; text-align: left; display: flex; flex-direction: column; border: none; padding: 8px 10px; background: none; }
 .entry.selected { background: var(--selected); }
+/* 一覧の上部に固定した検索欄の下に隠れないよう、見える位置まで動かすときの余白 */
+.list .entry { scroll-margin-top: 64px; }
 .entry .title { font-weight: 600; overflow: hidden; text-overflow: ellipsis; }
 
 .editor { padding: 16px 24px; overflow: auto; max-width: 820px; }

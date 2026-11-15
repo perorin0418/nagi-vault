@@ -3,7 +3,7 @@
 import * as path from 'node:path';
 import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { CfnOutput, Duration, Fn, RemovalPolicy, Stack, type StackProps } from 'aws-cdk-lib';
+import { CfnOutput, type CustomResourceProviderBase, Duration, Fn, RemovalPolicy, Stack, type StackProps } from 'aws-cdk-lib';
 import * as apigw from 'aws-cdk-lib/aws-apigatewayv2';
 import { HttpUserPoolAuthorizer } from 'aws-cdk-lib/aws-apigatewayv2-authorizers';
 import { HttpLambdaIntegration } from 'aws-cdk-lib/aws-apigatewayv2-integrations';
@@ -64,6 +64,17 @@ export class NagiVaultStack extends Stack {
       removalPolicy: RemovalPolicy.DESTROY,
       autoDeleteObjects: true,
     });
+
+    // autoDeleteObjects が作る補助 Lambda のロググループには保持期間の設定がないため、同じ名前で明示的に作って
+    // 14 日にそろえる（HANDOFF 3.1：ログの保持は 14 日）。関数名は ARN（arn:aws:lambda:地域:アカウント:function:名前）の 7 番目
+    const autoDeleteProvider = this.node.tryFindChild('Custom::S3AutoDeleteObjectsCustomResourceProvider') as CustomResourceProviderBase | undefined;
+    if (autoDeleteProvider) {
+      new logs.LogGroup(this, 'AutoDeleteObjectsLogs', {
+        logGroupName: `/aws/lambda/${Fn.select(6, Fn.split(':', autoDeleteProvider.serviceToken))}`,
+        retention: logs.RetentionDays.TWO_WEEKS,
+        removalPolicy: RemovalPolicy.DESTROY,
+      });
+    }
 
     // ---------- Cognito ----------
     const userPool = new cognito.UserPool(this, 'UserPool', {

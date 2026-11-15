@@ -12,7 +12,7 @@ AWS のサーバーレス構成で動く、ブラウザ用のパスワード保�
 - [x] Phase 1：インフラ（CDK）— 開発環境 `NagiVault-dev` をデプロイ済み
 - [x] Phase 2：API（Lambda）— 実トークンでの確認は Phase 3 で行う
 - [x] Phase 3：画面（ローカルと開発環境で確認済み。署名付き URL 方式を追加）
-- [ ] Phase 4：運用設定と仕上げ
+- [x] Phase 4：運用設定と仕上げ（運用手順は [docs/operations.md](docs/operations.md)。ログイン後の CSP 確認は利用者の操作で行う）
 
 ## 構成
 

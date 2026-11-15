@@ -14,8 +14,8 @@ HANDOFF.md「4. 作業手順 Phase 0」の結果を記録する。検証コー�
 | 鍵導出の設定値 | 🔶 暫定決定 | Node での計測に基づく暫定値。ブラウザでの再計測が必要 |
 | ライブラリの保守状況 | ✅ 完了 | **想定外の点あり**（kdbxweb の依存に既知の脆弱性。後述） |
 | kdbxweb のマージ機能 | ✅ 完了 | `Kdbx.merge()` で統合できる。手での入れ直しは不要 |
-| S3 の条件付き書き込み | ⏳ 未完了（AWS 認証情報なし） | 検証スクリプトは用意済み |
-| API Gateway → Lambda のバイナリと上限 | ⏳ 未完了（AWS 認証情報なし） | 理論値のみ記載 |
+| S3 の条件付き書き込み | ✅ 完了 | 想定どおり成功と 412 になる |
+| API Gateway → Lambda のバイナリと上限 | ⏳ 未完了（デプロイの確認待ち） | 理論値のみ記載 |
 
 ## 1. kdbxweb と Argon2
 
@@ -103,17 +103,25 @@ kdbxweb には `Kdbx.merge(remote)` がある。412 が返ったときは「最�
 - 更新時刻は秒精度。1 秒以内の競合では勝敗が意図どおりにならない可能性があるが、負けた側も履歴に残るのでデータは失われない。
 - `merge()` の後、remote 側のオブジェクトは参照で共有されるため変更しないこと（kdbxweb のドキュメントより）。
 
-## 3. S3 の条件付き書き込み（未完了）
+## 3. S3 の条件付き書き込み（`node s3-conditional.mjs <バケット名>`）
 
-作業環境の AWS 認証情報が無効（`InvalidClientTokenId`）だったため未実施。
+- 実施：us-east-1、一時バケット（パブリックアクセス全面ブロック、バージョニング有効）を作成して実行し、検証後に全バージョンとバケットを削除した。
+- SDK：@aws-sdk/client-s3 3.1161.0
 
-- 検証スクリプト：`verification/s3-conditional.mjs`（@aws-sdk/client-s3 3.1161.0。型定義上、PutObject に `IfMatch` / `IfNoneMatch` があることは確認済み）
-- 確認内容：バージョニング有効バケットで、新規 `IfNoneMatch:"*"` 成功 → 重複で 412 → 正しい ETag の `IfMatch` 成功 → 古い ETag で 412 → 後片付け
-- 実行にはバージョニング有効の検証用バケットが必要。AWS にリソースを作る操作のため、実行前に利用者の確認を取る。
+| 確認項目 | 結果 |
+|---|---|
+| バケットのバージョニングが有効 | OK |
+| 新規作成 `IfNoneMatch: "*"` → 成功 | OK（200、ETag を返す） |
+| 既存のキーに `IfNoneMatch: "*"` → 412 | OK（`PreconditionFailed`） |
+| 正しい ETag で `IfMatch` → 成功 | OK（200、新しい ETag を返す） |
+| 古い ETag で `IfMatch` → 412 | OK（`PreconditionFailed`） |
+| GetObject の ETag が最新の PutObject の ETag と一致し、内容は最新版のまま | OK |
+
+補足：412 になった書き込みは新しいバージョンを作らない（成功した 2 回分のバージョンだけが残った）。SDK のエラーは `name === 'PreconditionFailed'`、`$metadata.httpStatusCode === 412` で判別できる。Lambda ではこれを API の 412 に変換する。
 
 ## 4. API Gateway HTTP API → Lambda のバイナリと上限（未完了）
 
-AWS 認証情報がないため未実施。現時点の理論値のみ記す。
+未実施（検証用の API と Lambda のデプロイが必要なため、利用者の確認待ち）。現時点の理論値のみ記す。
 
 - Lambda の同期呼び出しのペイロード上限は 6 MB（要求・応答それぞれ）。HTTP API はバイナリ本文を Base64 にして `isBase64Encoded: true` で渡すため、本文の上限は約 6 MB × 3/4 から JSON の枠を引いた値になる。
 - HTTP API 自体の本文上限は 10 MB なので、Lambda 側の 6 MB が先に効く。
@@ -121,5 +129,4 @@ AWS 認証情報がないため未実施。現時点の理論値のみ記す。
 
 ## 次に必要な対応
 
-1. 有効な AWS 認証情報の用意と、S3 検証用バケットの作成可否の判断。
-2. 上記 1 の後、S3 条件付き書き込みと API Gateway のバイナリ上限を検証する。
+1. API Gateway HTTP API → Lambda のバイナリ送受信と最大サイズの実測（検証用の API と Lambda を一時的にデプロイする必要がある）。

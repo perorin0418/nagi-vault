@@ -266,16 +266,23 @@ function isDirty() {
 function confirmButton(label: string, confirmLabel: string, needsConfirm: () => boolean, action: () => void, cls = '') {
   const b = h('button', { class: cls, disabled: state.busy }, label);
   let armed = false;
+  let timer: number | undefined;
+  const disarm = () => {
+    clearTimeout(timer);
+    armed = false;
+    b.textContent = label;
+    b.classList.remove('danger');
+  };
   b.addEventListener('click', () => {
-    if (!needsConfirm() || armed) return action();
+    if (!needsConfirm() || armed) {
+      // 実行したら確認状態を解除する（続けて押したときも、もう一度確認する）
+      disarm();
+      return action();
+    }
     armed = true;
     b.textContent = confirmLabel;
     b.classList.add('danger');
-    setTimeout(() => {
-      armed = false;
-      b.textContent = label;
-      b.classList.remove('danger');
-    }, 4000);
+    timer = window.setTimeout(disarm, 4000);
   });
   return b;
 }
@@ -340,7 +347,32 @@ function renderEditor(db: K.Kdbx) {
 
   const pwInput = bind(h('input', { id: 'f-password', type: 'password', value: d.password, autocomplete: 'new-password', spellcheck: 'false' }), (v) => (d.password = v));
   const toggle = h('button', { type: 'button', onclick: () => { pwInput.type = pwInput.type === 'password' ? 'text' : 'password'; toggle.textContent = pwInput.type === 'password' ? '表示' : '隠す'; } }, '表示');
-  const gen = h('button', { type: 'button', onclick: () => { d.password = pwInput.value = K.generatePassword(); pwInput.type = 'text'; toggle.textContent = '隠す'; refreshSaveButton(); } }, '生成');
+  // 生成：すでにパスワードが入っているときは 2 回押しで確認し、生成後は「元に戻す」で直前の値に戻せるようにする
+  let previousPassword: string | null = null;
+  const setPassword = (v: string) => {
+    d.password = pwInput.value = v;
+    refreshSaveButton();
+  };
+  const undo = h('button', { type: 'button', hidden: true }, '元に戻す');
+  undo.addEventListener('click', () => {
+    if (previousPassword !== null) setPassword(previousPassword);
+    previousPassword = null;
+    undo.hidden = true;
+  });
+  // 手で書き換えたら、元に戻す対象はなくなる
+  pwInput.addEventListener('input', () => {
+    previousPassword = null;
+    undo.hidden = true;
+  });
+  const gen = confirmButton('生成', '上書きして生成', () => d.password !== '', () => {
+    // 続けて生成しても、元に戻す先は最初のパスワードのままにする
+    if (previousPassword === null && d.password !== '') previousPassword = d.password;
+    setPassword(K.generatePassword());
+    pwInput.type = 'text';
+    toggle.textContent = '隠す';
+    undo.hidden = previousPassword === null;
+  });
+  gen.type = 'button';
 
   const custom = h('div', { class: 'custom' }, d.custom.map((c, i) =>
     h('div', { class: 'row custom-row' },
@@ -357,7 +389,7 @@ function renderEditor(db: K.Kdbx) {
   return h('section', { class: 'editor' },
     text('f-title', 'タイトル', d.title, (v) => (d.title = v)),
     text('f-user', 'ユーザー名', d.userName, (v) => (d.userName = v), [h('button', { type: 'button', onclick: () => void copy(d.userName, 'ユーザー名') }, 'コピー')]),
-    h('div', { class: 'field' }, h('label', { for: 'f-password' }, 'パスワード'), h('div', { class: 'row' }, pwInput, toggle, gen, h('button', { type: 'button', onclick: () => void copy(d.password, 'パスワード') }, 'コピー'))),
+    h('div', { class: 'field' }, h('label', { for: 'f-password' }, 'パスワード'), h('div', { class: 'row' }, pwInput, toggle, gen, undo, h('button', { type: 'button', onclick: () => void copy(d.password, 'パスワード') }, 'コピー'))),
     text('f-url', 'URL', d.url, (v) => (d.url = v)),
     h('div', { class: 'field' }, h('label', { for: 'f-notes' }, 'メモ'), bind(h('textarea', { id: 'f-notes', rows: 4, spellcheck: 'false' }, d.notes), (v) => (d.notes = v))),
     h('div', { class: 'field' },

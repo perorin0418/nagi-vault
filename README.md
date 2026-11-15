@@ -8,7 +8,7 @@ AWS のサーバーレス構成で動く、ブラウザ用のパスワード保�
 
 ## 進捗
 
-- [x] Phase 0：技術検証（一部未完了。KeePassXC 確認と AWS 上の検証が残っている）
+- [x] Phase 0：技術検証（鍵導出の設定値のみ Phase 3 でブラウザ実測して確定）
 - [ ] Phase 1：インフラ（CDK）
 - [ ] Phase 2：API（Lambda）
 - [ ] Phase 3：画面

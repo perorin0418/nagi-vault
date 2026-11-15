@@ -11,11 +11,11 @@ HANDOFF.md「4. 作業手順 Phase 0」の結果を記録する。検証コー�
 |---|---|---|
 | kdbxweb + Argon2（作成・保存・再読込・添付） | ✅ 完了 | 想定どおり動作 |
 | KeePassXC との相互運用 | ✅ 完了 | 双方向に開ける（KDBX 4 / Argon2id、KDBX 3.1 / AES-KDF とも） |
-| 鍵導出の設定値 | 🔶 暫定決定 | Node での計測に基づく暫定値。ブラウザでの再計測が必要 |
+| 鍵導出の設定値 | 🔶 暫定決定（Phase 3 で確定） | Node での計測に基づく暫定値。ブラウザでの再計測が必要 |
 | ライブラリの保守状況 | ✅ 完了 | **想定外の点あり**（kdbxweb の依存に既知の脆弱性。後述） |
 | kdbxweb のマージ機能 | ✅ 完了 | `Kdbx.merge()` で統合できる。手での入れ直しは不要 |
 | S3 の条件付き書き込み | ✅ 完了 | 想定どおり成功と 412 になる |
-| API Gateway → Lambda のバイナリと上限 | ⏳ 未完了（デプロイの確認待ち） | 理論値のみ記載 |
+| API Gateway → Lambda のバイナリと上限 | ✅ 完了 | 要求・応答とも約 4.5 MiB が限界。上限値は 4 MiB に決定 |
 
 ## 1. kdbxweb と Argon2
 
@@ -119,14 +119,29 @@ kdbxweb には `Kdbx.merge(remote)` がある。412 が返ったときは「最�
 
 補足：412 になった書き込みは新しいバージョンを作らない（成功した 2 回分のバージョンだけが残った）。SDK のエラーは `name === 'PreconditionFailed'`、`$metadata.httpStatusCode === 412` で判別できる。Lambda ではこれを API の 412 に変換する。
 
-## 4. API Gateway HTTP API → Lambda のバイナリと上限（未完了）
+## 4. API Gateway HTTP API → Lambda のバイナリと上限（`verification/apigw-limit/`）
 
-未実施（検証用の API と Lambda のデプロイが必要なため、利用者の確認待ち）。現時点の理論値のみ記す。
+- 実施：us-east-1 に検証用の Lambda（nodejs24.x、arm64、256 MB）と HTTP API（ペイロード形式 2.0）を一時的に作り、測定後に API・関数・IAM ロール・ロググループをすべて削除した（`deploy.sh` / `measure.mjs` / `teardown.sh`）。
+- 方法：`application/octet-stream` の乱数バイナリを POST し、Lambda が受け取った長さと SHA-256 を照合。GET では Lambda が N バイトを Base64 で返し、受け取った長さと内容を照合。二分探索で 1 KiB 精度の最大値を求めた。
 
-- Lambda の同期呼び出しのペイロード上限は 6 MB（要求・応答それぞれ）。HTTP API はバイナリ本文を Base64 にして `isBase64Encoded: true` で渡すため、本文の上限は約 6 MB × 3/4 から JSON の枠を引いた値になる。
-- HTTP API 自体の本文上限は 10 MB なので、Lambda 側の 6 MB が先に効く。
-- 暫定の上限値：**4 MiB（4,194,304 バイト）**。Phase 1 で開発環境をデプロイした後、実際に通る最大サイズを測って確定する（応答側も同じ制約を受けるため、GET でも確認する）。
+| 方向 | 結果 | 最大サイズ | 超えたとき |
+|---|---|---|---|
+| 要求（保存） | バイナリは `isBase64Encoded: true` で届き、内容が一致 | 4,717,696 バイト（約 4.499 MiB） | API Gateway が **413** `Request Entity Too Large` を返す（Lambda は呼ばれない） |
+| 応答（取得） | `isBase64Encoded: true` で返したバイナリがそのまま届く | 4,718,336 バイト（約 4.500 MiB） | API Gateway が **500** `Internal Server Error` を返す |
+
+どちらも、Base64 後の大きさ（4.5 MiB × 4/3 = 6 MiB）が Lambda の 6 MB 制限に当たって止まる。HTTP API の 10 MB 制限より先にこちらが効く。
+
+想定と違った点：応答側の制限を超えると **500** になり、保管庫を取得できなくなる。保存できたのに取得できない状態を避けるため、上限は応答側を基準に余裕を持たせて決める必要がある。
+
+**決定：保管庫の上限は 4 MiB（4,194,304 バイト）。** Lambda は本文がこれを超えたら 413 を返す。測定値との差（約 0.5 MiB）は、Authorization ヘッダー（JWT）、ETag などのヘッダー、イベントの JSON の枠の分の余裕とする。画面では 4 MiB に対する使用量を表示し、例えば 3.5 MiB を超えたら警告する。
 
 ## 次に必要な対応
 
-1. API Gateway HTTP API → Lambda のバイナリ送受信と最大サイズの実測（検証用の API と Lambda を一時的にデプロイする必要がある）。
+Phase 0 の項目はすべて完了した。Phase 1 で反映すること：
+
+- Argon2 実装は hash-wasm 4.12.0。CSP の `script-src` に `'wasm-unsafe-eval'` を加える。
+- `@xmldom/xmldom` は overrides で 0.8.15 に固定し、画面のバンドルから除外する。
+- 412 のときは最新版を取り直して `Kdbx.merge()` で統合する。
+- 保管庫の上限は 4 MiB。Lambda で超過時に 413 を返す。
+- Lambda のランタイムは nodejs24.x（arm64）で動作を確認済み。
+- 鍵導出の設定値（Argon2id、64 MiB、反復 6、並列度 2）は、Phase 3 でブラウザでの実測をもとに確定する。

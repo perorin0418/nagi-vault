@@ -6,7 +6,7 @@
     "typecheck": "tsc -p .",
     "synth": "cdk synth --quiet",
     "diff": "cdk diff",
-    "deploy": "npm run build -w web --prefix .. && cdk deploy"
+    "deploy": "npm run build -w @nagi-vault/web && cdk deploy"
   },
   "devDependencies": {
     "@types/node": "24.19.2",

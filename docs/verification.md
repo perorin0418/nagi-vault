@@ -150,3 +150,20 @@ Phase 0 の項目はすべて完了した。Phase 1 で反映すること：
 
 - **aws-cdk-lib 2.275.0 が同梱する minimatch に moderate の指摘**（GHSA-g3hv-75wg-m249、パターン展開による DoS）。aws-cdk-lib の同梱依存（bundledDependencies）のため overrides では差し替えられない。手元でのデプロイ作業（cdk synth / deploy）でだけ使われ、Lambda や画面には含まれない。入力は自分で書いた CDK コードだけなので、実害はないと判断して受け入れる。aws-cdk-lib を更新するときに解消を確認する。
 - TypeScript は 7 系（ネイティブ実装に作り直された版）を避け、6.0.3 に固定した。
+- **存在しないキーに `IfMatch` を付けた PutObject は、412 ではなく 404（`NoSuchKey`）になる。** Phase 0 では既存のキーでだけ確かめていたため見落としていた。Phase 2 の結合確認で、他人の ETag を使って未作成の自分の保管庫に保存しようとした場合に 500 になって発覚した（書き込みは行われず、他人の保管庫にも影響はない）。Lambda で 404 も 412 として扱うように直し、単体テスト（`api/test/s3-store.test.ts`）を加えた。
+- 同じキーへの条件付き書き込みが同時に走った場合、S3 は 409（`ConditionalRequestConflict`）を返すことがある（AWS の仕様）。これも 412 として扱い、画面側で取り直しとマージを行う。
+
+## Phase 1・2 の完了確認（2026-11-15、`NagiVault-dev`、us-east-1）
+
+| 完了条件 | 結果 | 方法 |
+|---|---|---|
+| `cdk deploy` で全リソースが作られる | OK | |
+| CloudFront のドメインで画面が HTTPS で開ける | OK | HTTP は HTTPS へ 301 |
+| 画面配信用 S3 に直接アクセスすると拒否される | OK | S3 の URL は 403 |
+| CSP などのセキュリティヘッダーが付く | OK | `curl -I` で確認 |
+| トークンなしの要求が API Gateway で拒否される | OK | GET / PUT / 偽のトークンとも 401 |
+| 別の利用者は他人の保管庫に触れられない | OK | `scripts/e2e-lambda.mjs`（Lambda を直接呼び出し、実際の S3 で確認） |
+| 同じ ETag で2回保存すると2回目が 412 | OK | 同上 |
+| Lambda のログに本文やトークンが出ない | OK（この範囲では） | ログは利用者 ID・メソッド・状態・サイズ・処理時間だけ。Phase 4 で実際の利用後に再確認する |
+
+実際の Cognito のトークンを使った確認（他人のトークンで他人の保管庫に触れないこと）は、ログイン画面ができる Phase 3 で行う。

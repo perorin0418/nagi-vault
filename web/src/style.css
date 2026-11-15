@@ -74,7 +74,11 @@ label.check { display: flex; gap: 6px; align-items: center; color: var(--text); 
   display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between;
   padding: 10px 16px; background: var(--surface); border-bottom: 1px solid var(--border);
 }
-.brand { display: flex; flex-direction: column; }
+.brand { display: flex; gap: 10px; align-items: center; }
+.brand-text { display: flex; flex-direction: column; }
+.logo { display: block; flex-shrink: 0; user-select: none; }
+.card-title { display: flex; gap: 12px; align-items: center; margin-bottom: 12px; }
+.card-title h1 { margin: 0; }
 .size { display: flex; gap: 8px; align-items: center; }
 .size meter { width: 120px; }
 .actions { display: flex; gap: 8px; flex-wrap: wrap; }

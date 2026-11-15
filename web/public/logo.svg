@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="nagi-vault">
+  <!-- nagi-vault のロゴ：凪（穏やかな海）の波と、保管庫の鍵穴 -->
+  <defs>
+    <linearGradient id="nv-bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#3b7de8"/>
+      <stop offset="1" stop-color="#1b4a9c"/>
+    </linearGradient>
+  </defs>
+  <rect width="64" height="64" rx="14" fill="url(#nv-bg)"/>
+  <circle cx="32" cy="22.5" r="7.5" fill="#ffffff"/>
+  <path d="M28.4 26 H35.6 L37.8 38.5 H26.2 Z" fill="#ffffff"/>
+  <path d="M11 47.5 q5.25 -3.6 10.5 0 t10.5 0 t10.5 0 t10.5 0" fill="none" stroke="#ffffff" stroke-width="3.2" stroke-linecap="round"/>
+  <path d="M17 54.5 q5 -2.6 10 0 t10 0 t10 0" fill="none" stroke="#ffffff" stroke-width="2.4" stroke-linecap="round" opacity="0.55"/>
+</svg>

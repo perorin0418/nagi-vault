@@ -51,6 +51,12 @@ const state: State = {
   message: null,
 };
 
+/** ロゴ（web/public/logo.svg）。文字の「nagi-vault」と並べるので、画像自体の代替テキストは空にする */
+const logo = (size: number) => h('img', { src: '/logo.svg', alt: '', width: size, height: size, class: 'logo', draggable: 'false' });
+
+/** カード上部の見出し（ロゴ付き） */
+const cardTitle = (text: string) => h('div', { class: 'card-title' }, logo(40), h('h1', {}, text));
+
 function show(...nodes: Node[]) {
   root.replaceChildren(...nodes);
 }
@@ -80,7 +86,7 @@ async function main() {
 function showFatal(text: string) {
   show(
     h('section', { class: 'card narrow' },
-      h('h1', {}, 'nagi-vault'),
+      cardTitle('nagi-vault'),
       h('p', { class: 'msg error' }, text),
       h('button', { onclick: () => location.assign('/') }, '最初からやり直す'),
     ),
@@ -90,7 +96,7 @@ function showFatal(text: string) {
 function showLogin() {
   show(
     h('section', { class: 'card narrow' },
-      h('h1', {}, 'nagi-vault'),
+      cardTitle('nagi-vault'),
       h('p', {}, 'パスワード保管庫です。続けるにはログインしてください。'),
       h('p', { class: 'muted small' }, 'ログインのパスワードと、保管庫を開くマスターパスワードは別のものです。'),
       h('button', { class: 'primary', onclick: () => void login() }, 'ログイン'),
@@ -126,7 +132,7 @@ function showCreate() {
   const submit = h('button', { class: 'primary', type: 'submit' }, '保管庫を作る');
 
   const form = h('form', { class: 'card narrow' },
-    h('h1', {}, '保管庫を作る'),
+    cardTitle('保管庫を作る'),
     h('p', {}, 'まだ保管庫がありません。マスターパスワードを決めてください。'),
     forgetWarning(),
     h('label', { for: 'pw' }, 'マスターパスワード（12 文字以上）'), pw,
@@ -172,7 +178,7 @@ function showUnlock(remote: { bytes: Uint8Array; etag: string }) {
   const msg = h('p', { class: 'msg error', hidden: true });
   const submit = h('button', { class: 'primary', type: 'submit' }, '開く');
   const form = h('form', { class: 'card narrow' },
-    h('h1', {}, '保管庫を開く'),
+    cardTitle('保管庫を開く'),
     h('p', { class: 'muted small' }, `保管庫のサイズ: ${formatBytes(remote.bytes.byteLength)}`),
     h('label', { for: 'pw' }, 'マスターパスワード'), pw,
     msg, submit,
@@ -244,7 +250,7 @@ function renderHeader() {
   const ratio = Math.min(1, size / MAX_VAULT_BYTES);
   const meter = h('meter', { min: 0, max: 1, low: 0.9, high: 0.95, optimum: 0, value: ratio });
   return h('header', { class: 'top' },
-    h('div', { class: 'brand' }, h('strong', {}, 'nagi-vault'), h('span', { class: 'muted small' }, state.dev ? '開発モード（模擬 API）' : (userEmail() ?? ''))),
+    h('div', { class: 'brand' }, logo(32), h('div', { class: 'brand-text' }, h('strong', {}, 'nagi-vault'), h('span', { class: 'muted small' }, state.dev ? '開発モード（模擬 API）' : (userEmail() ?? '')))),
     h('div', { class: 'size', title: '保存のたびに保管庫全体を送るため、上限があります' },
       meter, h('span', { class: `small ${size >= warnBytes() ? 'warn-text' : 'muted'}` }, `${formatBytes(size)} / ${formatBytes(MAX_VAULT_BYTES)}`)),
     h('div', { class: 'actions' },

@@ -1,0 +1,276 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>パスワード保管庫 AWS構成案（使った分だけ課金）</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=BIZ+UDPGothic:wght@400;700&display=swap" rel="stylesheet">
+<style>
+:root {
+  color-scheme: light;
+  --paper: #f3f5f6;
+  --surface: #ffffff;
+  --ink: #1d2830;
+  --muted: #55636d;
+  --line: #c9d1d6;
+  --device: #22766a;
+  --device-bg: #e3f1ee;
+  --aws: #3a4c86;
+  --aws-bg: #eaedf6;
+  --warn: #9a5b0c;
+  --warn-bg: #fbf0dc;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    color-scheme: dark;
+    --paper: #161b1f;
+    --surface: #1f262b;
+    --ink: #e4e9ec;
+    --muted: #a3b0b8;
+    --line: #3a464e;
+    --device: #5cc2b1;
+    --device-bg: #1b3430;
+    --aws: #93a6e6;
+    --aws-bg: #232a40;
+    --warn: #e8b05a;
+    --warn-bg: #3a2e1a;
+  }
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: "BIZ UDPGothic", "Hiragino Sans", "Yu Gothic", "Meiryo", sans-serif;
+  font-size: 16px;
+  line-height: 1.8;
+}
+main { max-width: 1080px; margin: 0 auto; padding: 48px 24px 80px; }
+.prose { max-width: 46em; }
+h1 { font-size: 1.9rem; line-height: 1.35; margin: 0 0 8px; }
+.lead { color: var(--muted); margin: 0 0 40px; }
+h2 {
+  font-size: 1.3rem; margin: 56px 0 16px; padding-left: 12px;
+  border-left: 5px solid var(--aws);
+}
+h3 { font-size: 1.05rem; margin: 28px 0 8px; }
+p { margin: 0 0 14px; }
+.conclusion {
+  background: var(--surface); border: 1px solid var(--line);
+  border-left: 6px solid var(--device); padding: 20px 24px; border-radius: 4px;
+}
+.conclusion p:last-child { margin-bottom: 0; }
+figure { margin: 24px 0 0; }
+.diagram-wrap {
+  background: var(--surface); border: 1px solid var(--line); border-radius: 6px;
+  overflow-x: auto; padding: 12px;
+}
+.diagram-wrap svg { display: block; min-width: 900px; width: 100%; height: auto; }
+figcaption { color: var(--muted); font-size: .9rem; margin-top: 8px; }
+.table-wrap { overflow-x: auto; }
+table { border-collapse: collapse; width: 100%; min-width: 760px; background: var(--surface); font-size: .93rem; }
+th, td { border: 1px solid var(--line); padding: 10px 12px; vertical-align: top; text-align: left; }
+th { background: var(--aws-bg); }
+td:first-child { white-space: nowrap; font-weight: 700; }
+ol.steps { padding-left: 1.6em; }
+ol.steps li { margin-bottom: 10px; }
+.note {
+  background: var(--warn-bg); border-left: 5px solid var(--warn);
+  padding: 14px 18px; border-radius: 4px; margin: 16px 0;
+}
+code { font-family: Consolas, "Courier New", monospace; font-size: .92em; background: var(--aws-bg); padding: 1px 5px; border-radius: 3px; }
+
+/* SVG */
+.z-device { fill: var(--device-bg); stroke: var(--device); stroke-width: 2; }
+.z-aws { fill: var(--aws-bg); stroke: var(--aws); stroke-width: 2; stroke-dasharray: 8 6; }
+.z-label-d { fill: var(--device); font-weight: 700; font-size: 15px; }
+.z-label-a { fill: var(--aws); font-weight: 700; font-size: 15px; }
+.box { fill: var(--surface); stroke: var(--ink); stroke-width: 1.4; }
+.box-secret { fill: var(--surface); stroke: var(--device); stroke-width: 2.2; }
+.box-ops { fill: var(--surface); stroke: var(--line); stroke-width: 1.4; }
+.t-title { fill: var(--ink); font-weight: 700; font-size: 15px; }
+.t-sub { fill: var(--muted); font-size: 12.5px; }
+.t-edge { fill: var(--ink); font-size: 12.5px; }
+.edge { stroke: var(--ink); stroke-width: 1.6; fill: none; }
+.edge-dash { stroke: var(--muted); stroke-width: 1.4; fill: none; stroke-dasharray: 5 4; }
+.num-c { fill: var(--aws); }
+.num-t { fill: #ffffff; font-size: 12px; font-weight: 700; }
+.arrowhead { fill: var(--ink); }
+.arrowhead-m { fill: var(--muted); }
+</style>
+</head>
+<body>
+<main>
+
+<h1>パスワード保管庫の AWS 構成案</h1>
+<p class="lead">使った分だけ課金されるサービスだけで組む案（2026年11月時点の検討メモ）</p>
+
+<h2>結論</h2>
+<div class="conclusion prose">
+<p><strong>待機中の固定費をほぼゼロにするため、月額の固定料金がかからないサービスだけで構成します。</strong>止まっている間に残る費用は、保管しているファイルの保管料（数MB分）程度です。</p>
+<p><strong>暗号化と復号は利用者の端末（ブラウザ）の中だけで行い、AWS には暗号化済みのファイルだけを置きます。</strong>AWS 側の設定ミスや侵入があっても、マスターパスワードがなければ中身は読めません。</p>
+<p><strong>使う AWS サービスは6つです。</strong>入口をまとめる CloudFront（コンテンツ配信サービス）、画面と保管庫のファイルを置く S3（ファイル保管サービス）を2つ、ログインを担う Cognito（認証サービス）、API の受付とログイン確認をする API Gateway（API の受付サービス）、保管庫の読み書きを仲介する Lambda（呼ばれたときだけ動くプログラム実行環境）です。</p>
+</div>
+
+<h2>構成図</h2>
+<div class="prose">
+<p>緑の枠は、暗号化前の情報（平文）を扱ってよい範囲です。青い点線の枠は AWS で、ここには暗号文しか入りません。図の中の丸数字は、後の「処理の流れ」の手順番号を表します。点線の矢印は、データではなく確認のための参照を表します。</p>
+</div>
+<figure>
+<div class="diagram-wrap">
+<svg viewBox="0 0 1040 640" role="img" aria-label="パスワード保管庫のAWS構成図">
+  <defs>
+    <marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" class="arrowhead"/>
+    </marker>
+    <marker id="ahm" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" class="arrowhead-m"/>
+    </marker>
+  </defs>
+
+  <!-- zones -->
+  <rect x="16" y="150" width="244" height="320" rx="10" class="z-device"/>
+  <text x="30" y="176" class="z-label-d">利用者の端末</text>
+  <text x="30" y="196" class="t-sub">平文を扱ってよい範囲</text>
+
+  <rect x="290" y="30" width="734" height="590" rx="10" class="z-aws"/>
+  <text x="306" y="56" class="z-label-a">AWS</text>
+  <text x="352" y="56" class="t-sub">暗号文だけを置く範囲</text>
+
+  <!-- device boxes -->
+  <rect x="36" y="214" width="204" height="86" rx="6" class="box"/>
+  <text x="50" y="242" class="t-title">ブラウザの画面</text>
+  <text x="50" y="264" class="t-sub">kdbxweb で保管庫を読み書き</text>
+  <text x="50" y="283" class="t-sub">libsodium.js で暗号処理</text>
+
+  <rect x="36" y="340" width="204" height="106" rx="6" class="box-secret"/>
+  <text x="50" y="366" class="t-title">端末の外に出さないもの</text>
+  <text x="50" y="390" class="t-sub">マスターパスワード</text>
+  <text x="50" y="410" class="t-sub">復号した保管庫の中身</text>
+  <text x="50" y="430" class="t-sub">④ 復号・編集・再暗号化</text>
+
+  <!-- AWS boxes -->
+  <rect x="330" y="82" width="210" height="72" rx="6" class="box"/>
+  <text x="344" y="110" class="t-title">Cognito ユーザープール</text>
+  <text x="344" y="132" class="t-sub">ログインとトークン発行</text>
+
+  <rect x="330" y="248" width="210" height="96" rx="6" class="box"/>
+  <text x="344" y="276" class="t-title">CloudFront</text>
+  <text x="344" y="298" class="t-sub">入口を1つにまとめる</text>
+  <text x="344" y="317" class="t-sub">HTTPS とセキュリティヘッダー</text>
+
+  <rect x="610" y="150" width="196" height="76" rx="6" class="box"/>
+  <text x="624" y="178" class="t-title">S3（画面配信用）</text>
+  <text x="624" y="200" class="t-sub">非公開。CloudFront だけが読める</text>
+
+  <rect x="610" y="318" width="196" height="76" rx="6" class="box"/>
+  <text x="624" y="346" class="t-title">API Gateway</text>
+  <text x="624" y="368" class="t-sub">HTTP API。トークンを検証</text>
+
+  <rect x="846" y="318" width="160" height="76" rx="6" class="box"/>
+  <text x="860" y="346" class="t-title">Lambda</text>
+  <text x="860" y="368" class="t-sub">保管庫の読み書きを仲介</text>
+
+  <rect x="846" y="452" width="160" height="96" rx="6" class="box"/>
+  <text x="860" y="480" class="t-title">S3（保管庫）</text>
+  <text x="860" y="502" class="t-sub">暗号化済み kdbx</text>
+  <text x="860" y="521" class="t-sub">版の保持・条件付き書込</text>
+
+  <rect x="330" y="540" width="480" height="58" rx="6" class="box-ops"/>
+  <text x="344" y="564" class="t-title">運用</text>
+  <text x="344" y="586" class="t-sub">CloudWatch Logs（動作ログ）／ AWS Budgets（予算超過の通知）／ CloudTrail（操作履歴）</text>
+
+  <!-- edges -->
+  <!-- browser -> cognito (2) -->
+  <path d="M138,214 L138,118 L326,118" class="edge" marker-end="url(#ah)"/>
+  <circle cx="138" cy="160" r="11" class="num-c"/><text x="134" y="164" class="num-t">2</text>
+  <text x="156" y="108" class="t-edge">ログイン</text>
+
+  <!-- browser -> cloudfront -->
+  <path d="M240,280 L326,292" class="edge" marker-end="url(#ah)"/>
+  <text x="246" y="268" class="t-edge">HTTPS</text>
+
+  <!-- cloudfront -> s3 static (1) -->
+  <path d="M540,272 L606,200" class="edge" marker-end="url(#ah)"/>
+  <circle cx="565" cy="230" r="11" class="num-c"/><text x="561" y="234" class="num-t">1</text>
+  <text x="586" y="252" class="t-edge">/ 以下</text>
+
+  <!-- cloudfront -> api gateway (3,5) -->
+  <path d="M540,318 L606,352" class="edge" marker-end="url(#ah)"/>
+  <text x="530" y="370" class="t-edge">/api/ 以下</text>
+  <circle cx="556" cy="392" r="11" class="num-c"/><text x="552" y="396" class="num-t">3</text>
+  <circle cx="584" cy="392" r="11" class="num-c"/><text x="580" y="396" class="num-t">5</text>
+
+  <!-- api gateway -> lambda -->
+  <path d="M806,356 L842,356" class="edge" marker-end="url(#ah)"/>
+
+  <!-- lambda -> s3 vault -->
+  <path d="M926,394 L926,448" class="edge" marker-end="url(#ah)"/>
+  <text x="934" y="428" class="t-edge">取得・保存</text>
+
+  <!-- api gateway -.-> cognito (verify) -->
+  <path d="M806,330 L826,330 L826,118 L544,118" class="edge-dash" marker-end="url(#ahm)"/>
+  <text x="836" y="250" class="t-sub">トークンの署名を</text>
+  <text x="836" y="268" class="t-sub">公開鍵で確認</text>
+</svg>
+</div>
+<figcaption>図1　サービス構成と処理の流れ。丸数字は下記「処理の流れ」の手順番号。</figcaption>
+</figure>
+
+<h2>処理の流れ</h2>
+<div class="prose">
+<p>保管庫は、KeePass 系ソフトで使われる暗号化データベース形式（kdbx 形式）のファイル1つとして扱います。暗号化の形式を自分で決めずに済み、いざとなればファイルを KeePassXC（OSS のパスワード管理ソフト）で直接開けるためです。</p>
+<ol class="steps">
+<li><strong>画面を取得する。</strong>ブラウザが CloudFront 経由で、画面配信用の S3 から HTML と JavaScript を受け取ります。</li>
+<li><strong>ログインする。</strong>Cognito にログインし、アクセストークン（ログイン済みであることを示す、期限付きの電子署名付きデータ）を受け取ります。ここで使うパスワードは、保管庫を開くマスターパスワードとは別のものにします。</li>
+<li><strong>保管庫を取得する。</strong>アクセストークンを付けて <code>/api/</code> に要求すると、API Gateway がトークンを検証し、Lambda が保管庫用の S3 から暗号化済みファイルを返します。あわせて、ファイルの版を表す識別子（ETag）も返します。</li>
+<li><strong>端末の中で復号・編集・再暗号化する。</strong>マスターパスワードで復号し、編集後に再び暗号化します。この間、平文は端末の外に出ません。</li>
+<li><strong>保存する。</strong>手順3で受け取った ETag を付けて送ります。Lambda は「S3 上のファイルがその版のままなら上書きする」という条件付き書き込みを行います。別の端末が先に保存していた場合は失敗するので、画面は最新版を取り直して変更を取り込んでから保存し直します。</li>
+</ol>
+</div>
+
+<h2>各サービスの役割と設定のポイント</h2>
+<div class="table-wrap">
+<table>
+<thead><tr><th>サービス</th><th>役割</th><th>料金が発生する条件</th><th>設定のポイント</th></tr></thead>
+<tbody>
+<tr><td>CloudFront</td><td>画面と API の入口を1つのドメインにまとめる</td><td>転送量とリクエスト数に応じて（少人数なら常時無料枠に収まる見込み）</td><td>既定で付く <code>xxxx.cloudfront.net</code> のドメインを使えば、ドメイン代も証明書代もかからない。レスポンスヘッダーポリシー（返答に付けるヘッダーの設定）で CSP（読み込んでよいスクリプトを制限する仕組み）を厳しく設定する。<code>/api/</code> 以下はキャッシュを無効にし、Authorization ヘッダーを転送する。</td></tr>
+<tr><td>S3（画面配信用）</td><td>画面の HTML・JavaScript を置く</td><td>保管容量とリクエスト数に応じて</td><td>公開設定はせず、OAC（Origin Access Control。CloudFront からの読み取りだけを許可する仕組み）で CloudFront 経由に限定する。</td></tr>
+<tr><td>Cognito</td><td>利用者のログインとアクセストークンの発行</td><td>月間の利用者数に応じて（少人数なら無料枠内の見込み）</td><td>自己登録を無効にし、管理者が利用者を作成する。多要素認証（パスワードに加えて認証アプリのコードも求める方式）を必須にする。</td></tr>
+<tr><td>API Gateway</td><td>API の受付とトークン検証</td><td>リクエスト数に応じて（100万件あたり1ドル程度）</td><td>HTTP API 型の JWT オーソライザー（トークンの署名と有効期限を自動で確認する機能）で Cognito のトークンを検証する。利用者数に見合った流量制限をかける。</td></tr>
+<tr><td>Lambda</td><td>保管庫ファイルの取得と条件付き保存</td><td>呼び出し回数と実行時間に応じて</td><td>保存先のパスは、トークンに含まれる利用者 ID から Lambda 側で組み立てる（例 <code>vaults/{利用者ID}/vault.kdbx</code>）。画面から送られたパスは使わないので、他人の保管庫には触れない。VPC（AWS 内の閉じたネットワーク）には入れない。入れると外部通信に NAT ゲートウェイ（月額固定の通信中継）が必要になるため。リクエストやファイルの中身はログに出さない。</td></tr>
+<tr><td>S3（保管庫）</td><td>暗号化済み kdbx ファイルの保管</td><td>保管容量とリクエスト数に応じて（数MBならほぼ0円）</td><td>パブリックアクセスを全面ブロックする。バージョニング（上書き前の版を残す機能）を有効にし、ライフサイクルルール（古い版を自動削除する設定）で古い版を一定期間後に消す。サーバー側暗号化は無料の SSE-S3 で足りる。</td></tr>
+<tr><td>運用</td><td>ログ、費用の監視、操作履歴</td><td>ログの保管量に応じて</td><td>CloudWatch Logs は保持期間を短く設定する。AWS Budgets で月1ドルなど低い金額に通知を設定し、想定外の課金にすぐ気付けるようにする。CloudTrail は既定のイベント履歴（直近90日分の操作履歴）で足りるので、証跡（履歴を S3 に保存し続ける設定）は作らない。</td></tr>
+</tbody>
+</table>
+</div>
+
+<h2>採用しなかったサービスと理由</h2>
+<div class="prose">
+<p>いずれも待機中に固定費がかかるか、この規模では不要なものです。必要になったら後から足せます。</p>
+<h3>DynamoDB（従量課金のデータベース）</h3>
+<p>保管庫がファイル1つなら、版の管理は S3 の条件付き書き込みで足ります。人ごとに見せる項目を分ける共有機能や、操作履歴を作るときに追加を検討します。</p>
+<h3>KMS のカスタマー管理キー（自分で管理する暗号鍵）</h3>
+<p>鍵1つあたり月額がかかります。中身は端末で暗号化済みなので、S3 側の暗号化は無料の SSE-S3 で十分です。</p>
+<h3>AWS WAF（Web アクセスの防御サービス）</h3>
+<p>設定1つあたり月額がかかります。代わりに API Gateway の流量制限と Cognito の多要素認証で守ります。</p>
+<h3>Route 53（DNS サービス）と独自ドメイン</h3>
+<p>ホストゾーン（ドメインの設定を置く場所）に月額がかかります。CloudFront 既定のドメインで HTTPS が使えるので、独自ドメインが必要になるまでは使いません。</p>
+</div>
+
+<h2>確認が必要な点</h2>
+<div class="prose">
+<div class="note">
+<p>この構成案は、各サービスの仕様を実機で確かめる前の案です。着手前に次の点を確認してください。</p>
+</div>
+<p><strong>保管庫のファイルサイズの上限。</strong>Lambda が受け取れるリクエストの大きさには6MBの上限があります。秘密鍵ファイルを添付しても通常は収まりますが、大きなファイルを入れる場合は、Lambda が発行する署名付き URL（期限付きで S3 に直接アクセスできる URL）を使う方式への変更が必要です。</p>
+<p><strong>S3 の条件付き書き込みの動作。</strong>ETag を指定した上書き（If-Match 指定）が、使う SDK のバージョンとバージョニング有効のバケットで期待どおりに失敗・成功するか、実機で確認します。</p>
+<p><strong>kdbxweb の Argon2 対応。</strong>kdbxweb は Argon2（kdbx 形式の新しい版で使う鍵導出方式）の計算処理を自前で持たず、外部の実装を組み込む作りです。どの実装を組み込むかと、そのライブラリの保守状況を確認します。</p>
+<p><strong>無料枠の扱い。</strong>2025年7月以降に作成したアカウントは、無料枠がクレジット方式に変わっています。各サービスの常時無料枠が自分のアカウントでどう適用されるかは、請求コンソールで確認します。</p>
+</div>
+
+</main>
+</body>
+</html>

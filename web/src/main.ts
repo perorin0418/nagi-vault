@@ -379,6 +379,8 @@ function renderEditor(db: K.Kdbx) {
       bind(h('input', { value: c.name, placeholder: '名前', 'aria-label': '項目名', autocomplete: 'off' }), (v) => (c.name = v)),
       bind(h('input', { value: c.value, placeholder: '値', 'aria-label': '値', type: c.protect ? 'password' : 'text', autocomplete: 'off' }), (v) => (c.value = v)),
       h('label', { class: 'check small' }, h('input', { type: 'checkbox', checked: c.protect, onchange: (ev: Event) => { c.protect = (ev.target as HTMLInputElement).checked; renderMain(); } }), '秘密'),
+      // 値は入力中の最新を読む（c.value は入力のたびに更新される）
+      h('button', { type: 'button', onclick: () => void copy(c.value, c.name ? `「${c.name}」` : '追加フィールドの値') }, 'コピー'),
       h('button', { type: 'button', onclick: () => { d.custom.splice(i, 1); renderMain(); } }, '削除'),
     ),
   ));

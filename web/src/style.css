@@ -93,7 +93,7 @@ label.check { display: flex; gap: 6px; align-items: center; color: var(--text); 
 .row { display: flex; gap: 8px; align-items: center; }
 .row.between { justify-content: space-between; margin-top: 12px; }
 .custom-row { margin-top: 6px; }
-.custom-row label.check { margin: 0; }
+.custom-row label.check { margin: 0; white-space: nowrap; flex-shrink: 0; }
 .files { list-style: none; padding: 0; margin: 4px 0; }
 .files li { margin: 4px 0; padding: 6px 8px; border: 1px solid var(--border); border-radius: var(--radius); }
 .foot { border-top: 1px solid var(--border); padding-top: 12px; margin-top: 20px; }

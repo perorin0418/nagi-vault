@@ -145,3 +145,8 @@ Phase 0 の項目はすべて完了した。Phase 1 で反映すること：
 - 保管庫の上限は 4 MiB。Lambda で超過時に 413 を返す。
 - Lambda のランタイムは nodejs24.x（arm64）で動作を確認済み。
 - 鍵導出の設定値（Argon2id、64 MiB、反復 6、並列度 2）は、Phase 3 でブラウザでの実測をもとに確定する。
+
+## 付記：Phase 1 で判明したこと
+
+- **aws-cdk-lib 2.275.0 が同梱する minimatch に moderate の指摘**（GHSA-g3hv-75wg-m249、パターン展開による DoS）。aws-cdk-lib の同梱依存（bundledDependencies）のため overrides では差し替えられない。手元でのデプロイ作業（cdk synth / deploy）でだけ使われ、Lambda や画面には含まれない。入力は自分で書いた CDK コードだけなので、実害はないと判断して受け入れる。aws-cdk-lib を更新するときに解消を確認する。
+- TypeScript は 7 系（ネイティブ実装に作り直された版）を避け、6.0.3 に固定した。

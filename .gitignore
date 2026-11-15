@@ -3,3 +3,5 @@ cdk.out/
 out/
 .env
 *.local
+cdk.context.json
+dist/

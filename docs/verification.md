@@ -10,7 +10,7 @@ HANDOFF.md「4. 作業手順 Phase 0」の結果を記録する。検証コー�
 | 項目 | 状態 | 結論 |
 |---|---|---|
 | kdbxweb + Argon2（作成・保存・再読込・添付） | ✅ 完了 | 想定どおり動作 |
-| KeePassXC との相互運用 | ⏳ 未完了（利用者の手元で要実行） | 独立実装 pykeepass では双方向に開けることを確認済み |
+| KeePassXC との相互運用 | 🔶 ほぼ完了 | kdbxweb 製 → KeePassXC は OK。KeePassXC 製（KDBX 3.1）→ kdbxweb も OK。KeePassXC が書いた Argon2id ファイルの確認が残り |
 | 鍵導出の設定値 | 🔶 暫定決定 | Node での計測に基づく暫定値。ブラウザでの再計測が必要 |
 | ライブラリの保守状況 | ✅ 完了 | **想定外の点あり**（kdbxweb の依存に既知の脆弱性。後述） |
 | kdbxweb のマージ機能 | ✅ 完了 | `Kdbx.merge()` で統合できる。手での入れ直しは不要 |
@@ -52,20 +52,21 @@ kdbxweb 2.1.1 は `@xmldom/xmldom@^0.7.4` に依存しており、そのまま�
 |---|---|
 | kdbxweb で作成 → pykeepass 4.2.0 で開く | OK（kdf=argon2id、KDBX 4.0、パスワード・メモ・独自フィールド・添付すべて一致） |
 | pykeepass で作成（Argon2d）→ kdbxweb で開く | OK（項目と添付を取得） |
-| kdbxweb で作成 → **KeePassXC** で開く | **未実施** |
-| **KeePassXC** で作成 → kdbxweb で開く | **未実施** |
+| kdbxweb で作成 → KeePassXC 2.7.10 で開く | OK（KDBX 4 / Argon2id 64MiB を認識。パスワード・日本語メモ・独自フィールド・添付の秘密鍵がすべて一致。hash-wasm 版・noble 版とも） |
+| KeePassXC 2.7.10 で新規作成 → kdbxweb で開く | OK（項目と添付を取得）。ただし `keepassxc-cli db-create` は KDBX 3.1 / AES-KDF で作る |
+| KeePassXC が Argon2id の KDBX 4 を書き出す → kdbxweb で開く | **未確認**（下記） |
 
-KeePassXC 2.8.0（公式ポータブル版、SHA-256 照合済み）を検証用に取得したが、作業環境の権限設定によりダウンロードした実行ファイルの起動が許可されなかった。次の手順で利用者が確認する。
+確認方法：ホストに KeePassXC を入れず、使い捨てコンテナ（`debian:trixie-slim` + Debian 公式パッケージ `keepassxc-minimal` 2.7.10）で `keepassxc-cli` を動かした。
 
 ```bash
 cd verification
 npm ci
-npm run kdbx                      # out/ に検証用ファイルを作る
-KPXC_CLI="/path/to/keepassxc-cli" ./verify-keepassxc.sh
-npm run kdbx                      # external-keepassxc.kdbx を kdbxweb で開いた結果が表示される
+npm run kdbx -- --no-bench        # out/ に検証用ファイルを作る
+./keepassxc-container.sh          # コンテナ内で verify-keepassxc.sh を実行
+npm run kdbx -- --no-bench        # KeePassXC が作ったファイルを kdbxweb で開いた結果を表示
 ```
 
-GUI で確認する場合は、`verification/out/created-hashwasm.kdbx` をパスワード `correct horse battery staple` で開き、項目 `example` の添付 `id_ed25519` を取り出せることを確認する。
+想定と違った点：`keepassxc-cli db-create` は KDF を指定できず、KDBX 3.1 / AES-KDF のファイルを作る（GUI の新規作成は KDBX 4 が既定）。KeePassXC が書き出した Argon2id ファイルを確かめるため、kdbxweb で作った Argon2id ファイルを KeePassXC で編集・保存し、それを kdbxweb で開く手順を `verify-keepassxc.sh` に加えた。この手順を実行する前に Docker（Rancher Desktop）が応答しなくなったため、ここだけ未確認。
 
 ### 鍵導出の設定値（Argon2id 所要時間、Node・本機、p=2）
 
@@ -120,6 +121,6 @@ AWS 認証情報がないため未実施。現時点の理論値のみ記す。
 
 ## 次に必要な対応
 
-1. KeePassXC での相互運用確認（利用者の手元で `verify-keepassxc.sh` を実行）。
+1. KeePassXC が書き出した Argon2id ファイルを kdbxweb で開けるかの確認（Docker 復旧後に `keepassxc-container.sh` を再実行）。
 2. 有効な AWS 認証情報の用意と、S3 検証用バケットの作成可否の判断。
 3. 上記 2 の後、S3 条件付き書き込みと API Gateway のバイナリ上限を検証する。

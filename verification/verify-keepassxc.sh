@@ -19,3 +19,13 @@ printf 'binary-from-keepassxc' > kpxc.bin
 printf '%s\n' "$PW" | "$CLI" attachment-import external-keepassxc.kdbx from-keepassxc kpxc.bin kpxc.bin
 rm -f kpxc.bin
 echo "== 続けて 'npm run kdbx' を実行すると external-keepassxc.kdbx を kdbxweb で開いた結果が出る"
+
+# keepassxc-cli の db-create は KDBX 3.1 / AES-KDF で作る（KDF を指定できない）。
+# Argon2id の KDBX 4 を KeePassXC に書かせるため、kdbxweb 製のファイルを KeePassXC で編集・保存する。
+echo "== KeePassXC で Argon2id ファイルを編集・保存する: external-keepassxc-argon2id.kdbx"
+cp created-hashwasm.kdbx external-keepassxc-argon2id.kdbx
+printf '%s\n' "$PW" | "$CLI" add -u dave external-keepassxc-argon2id.kdbx from-keepassxc-argon2id
+printf 'binary-from-keepassxc-argon2id' > kpxc2.bin
+printf '%s\n' "$PW" | "$CLI" attachment-import external-keepassxc-argon2id.kdbx from-keepassxc-argon2id kpxc2.bin kpxc2.bin
+rm -f kpxc2.bin
+printf '%s\n' "$PW" | "$CLI" db-info external-keepassxc-argon2id.kdbx | grep -E 'KDF|Cipher'

@@ -78,7 +78,7 @@ async function bench() {
 async function openExternal() {
   // KeePassXC など外部ツールで作成したファイルを開く（存在すれば）
   kdbxweb.CryptoEngine.setArgon2Impl(hashWasmImpl);
-  for (const name of ['external-keepassxc.kdbx', 'external-pykeepass.kdbx']) {
+  for (const name of ['external-keepassxc.kdbx', 'external-keepassxc-argon2id.kdbx', 'external-pykeepass.kdbx']) {
     const p = new URL(name, OUT);
     if (!existsSync(p)) { log(`${name}: not present (skipped)`); continue; }
     const db = await kdbxweb.Kdbx.load(new Uint8Array(readFileSync(p)).buffer,
@@ -88,7 +88,9 @@ async function openExternal() {
       title: e.fields.get('Title'), pass: e.fields.get('Password')?.getText?.(),
       bins: [...e.binaries.keys()],
     });
-    log(`${name}: opened OK, kdf=${kdbxweb.ByteUtils.bytesToBase64(db.header.kdfParameters.get('$UUID'))}`, JSON.stringify(entries));
+    const kdfId = db.header.kdfParameters ? kdbxweb.ByteUtils.bytesToBase64(db.header.kdfParameters.get('$UUID')) : null;
+    const kdf = Object.entries(kdbxweb.Consts.KdfId).find(([, v]) => v === kdfId)?.[0] ?? 'AES-KDF';
+    log(`${name}: opened OK, KDBX ${db.header.versionMajor}.${db.header.versionMinor}, kdf=${kdf}`, JSON.stringify(entries));
   }
 }
 

@@ -1,54 +1,53 @@
-// 保管庫 API の本体。S3 クライアントは注入できるようにして、単体テストで差し替える。
+// 保管庫 API の本体。S3 の操作は注入できるようにして、単体テストで差し替える。
+//
+// 保管庫ファイルそのものは Lambda を通さず、ブラウザと S3 の間で署名付き URL を使って直接やり取りする
+// （Lambda の 6 MB 制限を避けるため。docs/verification.md 5 章）。Lambda は次だけを行う。
+// - GET  /api/vault            : 保管庫の有無・ETag・サイズと、ダウンロード用の署名付き URL を返す
+// - POST /api/vault/upload-url : 条件（If-Match / If-None-Match）と大きさを署名に含めたアップロード用 URL を返す
 //
 // セキュリティ上の約束（HANDOFF 3.3 / 3.4）:
 // - 保存先のキーはトークンの sub クレームからだけ組み立てる。リクエストの値は使わない。
-// - リクエスト本文や保管庫の中身、トークンはログに出さない。
+// - 条件なしの上書きはさせない（条件ヘッダーは署名に含めるので、利用者は外せない）。
+// - リクエスト本文やトークンはログに出さない。
 import type { APIGatewayProxyEventV2WithJWTAuthorizer, APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
 
-/** 保管庫の大きさの上限（docs/verification.md 4 章で決定） */
-export const MAX_VAULT_BYTES = 4 * 1024 * 1024;
+/** 保管庫の大きさの上限 */
+export const MAX_VAULT_BYTES = 64 * 1024 * 1024;
+/** 署名付き URL の有効期限（秒） */
+export const URL_EXPIRES_SECONDS = 300;
 
 /** Cognito の sub は UUID 形式 */
 const SUB_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+/** S3 の ETag（引用符付き） */
+const ETAG_PATTERN = /^"[0-9A-Za-z-]{1,128}"$/;
 
 export function vaultKey(sub: string): string {
   if (!SUB_PATTERN.test(sub)) throw new Error('invalid sub');
   return `vaults/${sub}/vault.kdbx`;
 }
 
-/** 必要な S3 操作だけを抜き出した口。本番は @aws-sdk/client-s3 をこれに合わせて包む */
-export interface VaultStore {
-  get(key: string): Promise<{ body: Uint8Array; etag: string } | null>;
-  /** 条件が合わなければ PreconditionFailedError を投げる */
-  put(key: string, body: Uint8Array, cond: { ifMatch: string } | { ifNoneMatch: '*' }): Promise<{ etag: string }>;
-}
+export type UploadCondition = { ifMatch: string } | { ifNoneMatch: '*' };
 
-export class PreconditionFailedError extends Error {
-  constructor() {
-    super('precondition failed');
-    this.name = 'PreconditionFailedError';
-  }
+/** 必要な S3 操作だけを抜き出した口 */
+export interface VaultStore {
+  head(key: string): Promise<{ etag: string; size: number } | null>;
+  presignGet(key: string, expiresIn: number): Promise<string>;
+  presignPut(key: string, size: number, cond: UploadCondition, expiresIn: number): Promise<string>;
 }
 
 export type Logger = (record: Record<string, string | number | boolean>) => void;
 
 type Result = APIGatewayProxyStructuredResultV2;
 
-const BASE_HEADERS = { 'cache-control': 'no-store' };
-
 function json(statusCode: number, body: Record<string, unknown>, headers: Record<string, string> = {}): Result {
-  return { statusCode, headers: { ...BASE_HEADERS, 'content-type': 'application/json', ...headers }, body: JSON.stringify(body) };
-}
-
-function header(event: APIGatewayProxyEventV2WithJWTAuthorizer, name: string): string | undefined {
-  // HTTP API（ペイロード 2.0）はヘッダー名を小文字にして渡す
-  return event.headers?.[name];
+  return { statusCode, headers: { 'cache-control': 'no-store', 'content-type': 'application/json', ...headers }, body: JSON.stringify(body) };
 }
 
 export function createHandler(store: VaultStore, log: Logger = (r) => console.log(JSON.stringify(r))) {
   return async function handler(event: APIGatewayProxyEventV2WithJWTAuthorizer): Promise<Result> {
     const started = Date.now();
     const method = event.requestContext.http.method;
+    const path = event.rawPath;
     const sub = event.requestContext.authorizer?.jwt?.claims?.['sub'];
     let result: Result;
     let bytes = 0;
@@ -57,69 +56,58 @@ export function createHandler(store: VaultStore, log: Logger = (r) => console.lo
       if (typeof sub !== 'string' || !SUB_PATTERN.test(sub)) {
         // JWT オーソライザーを通っていれば起きないはずだが、念のため拒否する
         result = json(401, { error: 'unauthorized' });
-      } else if (method === 'GET') {
-        const obj = await store.get(vaultKey(sub));
+      } else if (path === '/api/vault' && method === 'GET') {
+        const key = vaultKey(sub);
+        const obj = await store.head(key);
         if (!obj) {
-          result = json(404, { error: 'vault not found' });
+          result = json(404, { error: 'vault not found', maxBytes: MAX_VAULT_BYTES });
         } else {
-          bytes = obj.body.byteLength;
-          result = {
-            statusCode: 200,
-            isBase64Encoded: true,
-            headers: { ...BASE_HEADERS, 'content-type': 'application/octet-stream', etag: obj.etag },
-            body: Buffer.from(obj.body).toString('base64'),
-          };
+          bytes = obj.size;
+          const downloadUrl = await store.presignGet(key, URL_EXPIRES_SECONDS);
+          result = json(200, { etag: obj.etag, size: obj.size, maxBytes: MAX_VAULT_BYTES, downloadUrl });
         }
-      } else if (method === 'PUT') {
-        result = await handlePut(event, sub, store, (n) => (bytes = n));
+      } else if (path === '/api/vault/upload-url' && method === 'POST') {
+        const r = await uploadUrl(event, sub, store);
+        bytes = r.bytes;
+        result = r.result;
       } else {
-        result = json(405, { error: 'method not allowed' }, { allow: 'GET, PUT' });
+        result = json(404, { error: 'not found' });
       }
     } catch (err) {
-      // エラーの詳細（メッセージ）には本文が含まれないが、念のため名前だけ記録する
       log({ level: 'error', error: err instanceof Error ? err.name : 'unknown' });
       result = json(500, { error: 'internal error' });
     }
 
-    log({
-      level: 'info',
-      sub: typeof sub === 'string' ? sub : 'none',
-      method,
-      status: result.statusCode ?? 0,
-      bytes,
-      ms: Date.now() - started,
-    });
+    log({ level: 'info', sub: typeof sub === 'string' ? sub : 'none', method, path, status: result.statusCode ?? 0, bytes, ms: Date.now() - started });
     return result;
   };
 }
 
-async function handlePut(
-  event: APIGatewayProxyEventV2WithJWTAuthorizer,
-  sub: string,
-  store: VaultStore,
-  setBytes: (n: number) => void,
-): Promise<Result> {
-  const ifMatch = header(event, 'if-match');
-  const ifNoneMatch = header(event, 'if-none-match');
-  if (ifMatch && ifNoneMatch) return json(400, { error: 'specify only one of If-Match or If-None-Match' });
-  if (ifNoneMatch !== undefined && ifNoneMatch !== '*') return json(400, { error: 'If-None-Match must be *' });
-  // 条件なしの上書きは受け付けない（他の端末の保存を消してしまうため）
-  if (!ifMatch && !ifNoneMatch) return json(428, { error: 'If-Match or If-None-Match: * is required' });
-
-  if (!event.isBase64Encoded) return json(415, { error: 'body must be application/octet-stream' });
-  const body = Buffer.from(event.body ?? '', 'base64');
-  setBytes(body.byteLength);
-  if (body.byteLength === 0) return json(400, { error: 'empty body' });
-  if (body.byteLength > MAX_VAULT_BYTES) return json(413, { error: 'vault too large', maxBytes: MAX_VAULT_BYTES });
-
-  const creating = !ifMatch;
+async function uploadUrl(event: APIGatewayProxyEventV2WithJWTAuthorizer, sub: string, store: VaultStore): Promise<{ result: Result; bytes: number }> {
+  let req: unknown;
   try {
-    const { etag } = await store.put(vaultKey(sub), body, creating ? { ifNoneMatch: '*' } : { ifMatch: ifMatch! });
-    return json(creating ? 201 : 200, { etag }, { etag });
-  } catch (err) {
-    if (err instanceof PreconditionFailedError) {
-      return json(412, { error: creating ? 'vault already exists' : 'vault was updated by another session' });
-    }
-    throw err;
+    const raw = event.isBase64Encoded ? Buffer.from(event.body ?? '', 'base64').toString('utf8') : (event.body ?? '');
+    if (raw.length > 1024) return { result: json(400, { error: 'request too large' }), bytes: 0 };
+    req = JSON.parse(raw);
+  } catch {
+    return { result: json(400, { error: 'body must be JSON' }), bytes: 0 };
   }
+  if (typeof req !== 'object' || req === null) return { result: json(400, { error: 'body must be a JSON object' }), bytes: 0 };
+  const { size, ifMatch, ifNoneMatch } = req as Record<string, unknown>;
+
+  if (typeof size !== 'number' || !Number.isSafeInteger(size) || size <= 0) return { result: json(400, { error: 'size must be a positive integer' }), bytes: 0 };
+  if (size > MAX_VAULT_BYTES) return { result: json(413, { error: 'vault too large', maxBytes: MAX_VAULT_BYTES }), bytes: size };
+  if (ifMatch !== undefined && ifNoneMatch !== undefined) return { result: json(400, { error: 'specify only one of ifMatch or ifNoneMatch' }), bytes: size };
+  if (ifMatch === undefined && ifNoneMatch === undefined) return { result: json(428, { error: 'ifMatch or ifNoneMatch: "*" is required' }), bytes: size };
+  if (ifNoneMatch !== undefined && ifNoneMatch !== '*') return { result: json(400, { error: 'ifNoneMatch must be "*"' }), bytes: size };
+  if (ifMatch !== undefined && (typeof ifMatch !== 'string' || !ETAG_PATTERN.test(ifMatch))) return { result: json(400, { error: 'invalid ifMatch' }), bytes: size };
+
+  const cond: UploadCondition = ifMatch !== undefined ? { ifMatch: ifMatch as string } : { ifNoneMatch: '*' };
+  const uploadUrl = await store.presignPut(vaultKey(sub), size, cond, URL_EXPIRES_SECONDS);
+  // ブラウザが S3 に送るときに付けるヘッダー（署名に含まれているので、変えると 403 になる）
+  const headers: Record<string, string> = {
+    'content-type': 'application/octet-stream',
+    ...('ifMatch' in cond ? { 'if-match': cond.ifMatch } : { 'if-none-match': '*' }),
+  };
+  return { result: json(200, { uploadUrl, headers, expiresIn: URL_EXPIRES_SECONDS }), bytes: size };
 }

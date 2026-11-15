@@ -18,9 +18,12 @@ if (!budgetEmail) throw new Error('環境変数 NAGI_VAULT_BUDGET_EMAIL に費�
 const suffix = createHash('sha256').update(`${account}:${region}`).digest('hex').slice(0, 8);
 const cognitoDomainPrefix = (app.node.tryGetContext('cognitoDomainPrefix') as string | undefined) ?? `nagi-vault-${envName}-${suffix}`;
 
+const vaultBucketName = (app.node.tryGetContext('vaultBucketName') as string | undefined) ?? `nagi-vault-${envName}-vault-${suffix}`;
+
 const stack = new NagiVaultStack(app, `NagiVault-${envName}`, {
   env: { account, region },
   envName,
+  vaultBucketName,
   cognitoDomainPrefix,
   budgetEmail,
 });

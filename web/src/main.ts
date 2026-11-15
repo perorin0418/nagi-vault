@@ -11,7 +11,8 @@ import { loadConfig, type AppConfig } from './config';
 import { downloadBytes, formatBytes, h } from './dom';
 import * as K from './kdbx';
 
-const WARN_BYTES = 3.5 * 1024 * 1024;
+/** 上限の 90% で警告する（上限はサーバーの応答で決まる） */
+const warnBytes = () => MAX_VAULT_BYTES * 0.9;
 const IDLE_LOCK_MS = 10 * 60 * 1000;
 const CLIPBOARD_CLEAR_MS = 30 * 1000;
 const MAX_SAVE_ATTEMPTS = 3;
@@ -241,11 +242,11 @@ function renderMain() {
 function renderHeader() {
   const size = estimatedSize();
   const ratio = Math.min(1, size / MAX_VAULT_BYTES);
-  const meter = h('meter', { min: 0, max: 1, low: WARN_BYTES / MAX_VAULT_BYTES, high: 0.95, optimum: 0, value: ratio });
+  const meter = h('meter', { min: 0, max: 1, low: 0.9, high: 0.95, optimum: 0, value: ratio });
   return h('header', { class: 'top' },
     h('div', { class: 'brand' }, h('strong', {}, 'nagi-vault'), h('span', { class: 'muted small' }, state.dev ? '開発モード（模擬 API）' : (userEmail() ?? ''))),
     h('div', { class: 'size', title: '保存のたびに保管庫全体を送るため、上限があります' },
-      meter, h('span', { class: `small ${size >= WARN_BYTES ? 'warn-text' : 'muted'}` }, `${formatBytes(size)} / ${formatBytes(MAX_VAULT_BYTES)}`)),
+      meter, h('span', { class: `small ${size >= warnBytes() ? 'warn-text' : 'muted'}` }, `${formatBytes(size)} / ${formatBytes(MAX_VAULT_BYTES)}`)),
     h('div', { class: 'actions' },
       h('button', { class: 'primary', disabled: state.busy || !isDirty(), onclick: () => void save() }, isDirty() ? '保存' : '保存済み'),
       h('button', { disabled: state.busy, onclick: () => void download() }, 'ダウンロード'),
@@ -408,7 +409,7 @@ async function addFiles(db: K.Kdbx, entry: K.KdbxEntry, files: File[]) {
     markDirty();
   }
   state.draft = K.draftOf(entry);
-  if (estimatedSize() >= WARN_BYTES) setMessage('warn', `保管庫が ${formatBytes(estimatedSize())} になります。上限は ${formatBytes(MAX_VAULT_BYTES)} です。`);
+  if (estimatedSize() >= warnBytes()) setMessage('warn', `保管庫が ${formatBytes(estimatedSize())} になります。上限は ${formatBytes(MAX_VAULT_BYTES)} です。`);
   else renderMain();
 }
 

@@ -1,44 +1,40 @@
 // S3 を VaultStore の形に包む
-import { GetObjectCommand, PutObjectCommand, S3ServiceException, type S3Client } from '@aws-sdk/client-s3';
-import { PreconditionFailedError, type VaultStore } from './vault.js';
+import { GetObjectCommand, HeadObjectCommand, PutObjectCommand, S3ServiceException, type S3Client } from '@aws-sdk/client-s3';
+import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
+import type { VaultStore } from './vault.js';
 
-type Sender = Pick<S3Client, 'send'>;
+/**
+ * 署名に含めるヘッダー。クエリーに移さず（unhoistable）ヘッダーのまま署名するので、
+ * ブラウザがこれらを外したり変えたりすると S3 が 403 を返す（docs/verification.md 5 章で確認）。
+ */
+const SIGNED_HEADERS = new Set(['content-length', 'content-type', 'if-match', 'if-none-match']);
 
 const statusOf = (err: unknown) => (err instanceof S3ServiceException ? err.$metadata.httpStatusCode : undefined);
 
-export function createS3Store(s3: Sender, bucket: string): VaultStore {
+export function createS3Store(s3: S3Client, bucket: string): VaultStore {
   return {
-    async get(key) {
+    async head(key) {
       try {
-        const res = await s3.send(new GetObjectCommand({ Bucket: bucket, Key: key }));
-        const body = await res.Body!.transformToByteArray();
-        return { body, etag: res.ETag! };
+        const res = await s3.send(new HeadObjectCommand({ Bucket: bucket, Key: key }));
+        return { etag: res.ETag!, size: res.ContentLength ?? 0 };
       } catch (err) {
-        // ListBucket 権限を付けているので、存在しない場合は 403 ではなく 404（NoSuchKey）になる
+        // ListBucket 権限を付けているので、存在しない場合は 403 ではなく 404 になる
         if (statusOf(err) === 404) return null;
         throw err;
       }
     },
-    async put(key, body, cond) {
-      try {
-        const res = await s3.send(
-          new PutObjectCommand({
-            Bucket: bucket,
-            Key: key,
-            Body: body,
-            ContentType: 'application/octet-stream',
-            ...('ifMatch' in cond ? { IfMatch: cond.ifMatch } : { IfNoneMatch: cond.ifNoneMatch }),
-          }),
-        );
-        return { etag: res.ETag! };
-      } catch (err) {
-        const status = statusOf(err);
-        // 412: 条件不一致
-        // 409: 同じキーへの条件付き書き込みが同時に走った（S3 の仕様）
-        // 404: 存在しないキーに If-Match を付けた（S3 は 412 ではなく NoSuchKey を返す。docs/verification.md 付記）
-        if (status === 412 || status === 409 || (status === 404 && 'ifMatch' in cond)) throw new PreconditionFailedError();
-        throw err;
-      }
+    presignGet(key, expiresIn) {
+      return getSignedUrl(s3, new GetObjectCommand({ Bucket: bucket, Key: key, ResponseCacheControl: 'no-store' }), { expiresIn });
+    },
+    presignPut(key, size, cond, expiresIn) {
+      const cmd = new PutObjectCommand({
+        Bucket: bucket,
+        Key: key,
+        ContentLength: size,
+        ContentType: 'application/octet-stream',
+        ...('ifMatch' in cond ? { IfMatch: cond.ifMatch } : { IfNoneMatch: cond.ifNoneMatch }),
+      });
+      return getSignedUrl(s3, cmd, { expiresIn, signableHeaders: SIGNED_HEADERS, unhoistableHeaders: SIGNED_HEADERS });
     },
   };
 }

@@ -24,6 +24,11 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..')
 export interface NagiVaultStackProps extends StackProps {
   /** 環境名（dev など） */
   readonly envName: string;
+  /**
+   * 保管庫用バケットの名前（全世界で一意）。CSP の connect-src に名前を書くため、自動生成ではなく固定にする
+   * （自動生成だと CloudFront → CSP → バケット → CORS → CloudFront の循環参照になる）
+   */
+  readonly vaultBucketName: string;
   /** Cognito のドメインの接頭辞（リージョン内で一意） */
   readonly cognitoDomainPrefix: string;
   /** 費用通知の送り先。リポジトリには書かず、デプロイ時に渡す */
@@ -36,6 +41,7 @@ export class NagiVaultStack extends Stack {
 
     // ---------- S3（保管庫） ----------
     const vaultBucket = new s3.Bucket(this, 'VaultBucket', {
+      bucketName: props.vaultBucketName,
       blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
       encryption: s3.BucketEncryption.S3_MANAGED, // 中身はブラウザで暗号化済み。SSE-S3 で十分（HANDOFF 2 章）
       enforceSSL: true,
@@ -125,11 +131,13 @@ export class NagiVaultStack extends Stack {
     });
 
     // ---------- CloudFront ----------
+    // 保管庫ファイルはブラウザと S3 の間で署名付き URL を使って直接やり取りする（docs/verification.md 5 章）
+    const vaultS3Origin = `https://${props.vaultBucketName}.s3.${this.region}.amazonaws.com`;
     const cspDirectives = [
       "default-src 'self'",
       // hash-wasm（Argon2）が WebAssembly を使うため 'wasm-unsafe-eval' を加える（docs/verification.md）
       "script-src 'self' 'wasm-unsafe-eval'",
-      `connect-src 'self' https://${cognitoHost}`,
+      `connect-src 'self' https://${cognitoHost} ${vaultS3Origin}`,
       "object-src 'none'",
       "base-uri 'none'",
       "frame-ancestors 'none'",
@@ -172,6 +180,15 @@ export class NagiVaultStack extends Stack {
     });
     const appUrl = `https://${distribution.distributionDomainName}`;
 
+    // 画面のドメインからだけ、保管庫ファイルの取得と条件付き保存を許可する。ETag を画面から読めるようにする
+    vaultBucket.addCorsRule({
+      allowedOrigins: [appUrl],
+      allowedMethods: [s3.HttpMethods.GET, s3.HttpMethods.PUT],
+      allowedHeaders: ['content-type', 'if-match', 'if-none-match'],
+      exposedHeaders: ['ETag'],
+      maxAge: 600,
+    });
+
     // ---------- Cognito アプリクライアント（PKCE、シークレットなし） ----------
     const client = userPool.addClient('WebClient', {
       generateSecret: false,
@@ -196,12 +213,9 @@ export class NagiVaultStack extends Stack {
 
     // ---------- API のルート（JWT オーソライザー） ----------
     const authorizer = new HttpUserPoolAuthorizer('CognitoAuthorizer', userPool, { userPoolClients: [client] });
-    httpApi.addRoutes({
-      path: '/api/vault',
-      methods: [apigw.HttpMethod.GET, apigw.HttpMethod.PUT],
-      integration: new HttpLambdaIntegration('VaultIntegration', vaultFn),
-      authorizer,
-    });
+    const integration = new HttpLambdaIntegration('VaultIntegration', vaultFn);
+    httpApi.addRoutes({ path: '/api/vault', methods: [apigw.HttpMethod.GET], integration, authorizer });
+    httpApi.addRoutes({ path: '/api/vault/upload-url', methods: [apigw.HttpMethod.POST], integration, authorizer });
 
     // ---------- 画面の配置 ----------
     const webDist = path.join(ROOT, 'web/dist');

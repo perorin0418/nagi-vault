@@ -1,6 +1,7 @@
 // kdbx の読み書き。暗号化・復号はすべてこのブラウザの中で行う（HANDOFF 1 章）。
 import * as kdbxNs from 'kdbxweb';
 import { argon2d, argon2id } from 'hash-wasm';
+import type { ImportedLogin } from './csv-import';
 
 // kdbxweb は CommonJS なので、バンドラーによって default に入る場合がある
 const kdbxweb = ((kdbxNs as unknown as { default?: typeof kdbxNs }).default ?? kdbxNs) as typeof kdbxNs;
@@ -157,6 +158,35 @@ export function newEntry(db: Kdbx): KdbxEntry {
   e.fields.set('Title', '新しい項目');
   e.fields.set('Password', kdbxweb.ProtectedValue.fromString(''));
   return e;
+}
+
+/**
+ * CSV から読んだログイン情報を、新しいグループにまとめて追加する。
+ * URL・ユーザー名・パスワードがすべて同じ項目がすでにあるもの（CSV の中の重複を含む）は飛ばす。
+ */
+export function importLogins(db: Kdbx, logins: ImportedLogin[], groupName: string): { added: number; skipped: number; group: kdbxNs.KdbxGroup | null } {
+  const key = (url: string, user: string, pw: string) => JSON.stringify([url, user, pw]);
+  const seen = new Set(listEntries(db).map((e) => key(fieldText(e, 'URL'), fieldText(e, 'UserName'), fieldText(e, 'Password'))));
+  let group: kdbxNs.KdbxGroup | null = null;
+  let added = 0;
+  let skipped = 0;
+  for (const l of logins) {
+    const k = key(l.url, l.userName, l.password);
+    if (seen.has(k)) {
+      skipped++;
+      continue;
+    }
+    seen.add(k);
+    group ??= db.createGroup(db.getDefaultGroup(), groupName);
+    const e = db.createEntry(group);
+    e.fields.set('Title', l.title);
+    e.fields.set('UserName', l.userName);
+    e.fields.set('Password', kdbxweb.ProtectedValue.fromString(l.password));
+    e.fields.set('URL', l.url);
+    e.fields.set('Notes', l.notes);
+    added++;
+  }
+  return { added, skipped, group };
 }
 
 /** 削除（ごみ箱へ移動。ごみ箱が無効なら完全削除） */

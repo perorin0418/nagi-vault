@@ -8,6 +8,7 @@ import './style.css';
 import { ApiError, AuthRequiredError, ConflictError, fetchVault, MAX_VAULT_BYTES, setDevMode, storeVault } from './api';
 import { handleRedirect, initAuth, login, logout, userEmail } from './auth';
 import { loadConfig, type AppConfig } from './config';
+import { CsvFormatError, parseLoginCsv } from './csv-import';
 import { downloadBytes, formatBytes, h } from './dom';
 import * as K from './kdbx';
 
@@ -270,6 +271,7 @@ function renderHeader() {
     h('div', { class: 'actions' },
       h('button', { class: 'primary', disabled: state.busy || !isDirty(), onclick: () => void save() }, isDirty() ? '保存' : '保存済み'),
       h('button', { disabled: state.busy, onclick: () => void download() }, 'ダウンロード'),
+      h('button', { disabled: state.busy, title: 'Chrome・Brave・Edge・Firefox などが書き出したパスワードの CSV を取り込みます', onclick: pickCsv }, 'CSV を取り込む'),
       confirmButton('ロック', '変更を破棄してロック', () => isDirty(), lock),
       state.dev ? null : confirmButton('ログアウト', '変更を破棄してログアウト', () => isDirty(), () => logout()),
     ),
@@ -547,6 +549,45 @@ async function download() {
   } catch (err) {
     state.busy = false;
     setMessage('error', errorText(err));
+  }
+}
+
+// ---------------------------------------------------------------- CSV の取り込み
+
+/** これより大きい CSV は取り込まない（パスワードの CSV としては十分に大きい） */
+const MAX_CSV_BYTES = 10 * 1024 * 1024;
+
+function pickCsv() {
+  const input = h('input', { type: 'file', accept: '.csv,text/csv' });
+  input.addEventListener('change', () => {
+    const f = input.files?.[0];
+    if (f) void importCsv(f);
+  });
+  input.click();
+}
+
+async function importCsv(file: File) {
+  const db = state.db;
+  if (!db || state.busy) return;
+  if (file.size > MAX_CSV_BYTES) return setMessage('error', `CSV が ${formatBytes(file.size)} で、取り込める上限 ${formatBytes(MAX_CSV_BYTES)} を超えています。`);
+  if (estimatedSize() + file.size > MAX_VAULT_BYTES) return setMessage('error', `この CSV を取り込むと保管庫の上限 ${formatBytes(MAX_VAULT_BYTES)} を超えるおそれがあります。`);
+  commitDraft();
+  try {
+    const logins = parseLoginCsv(await file.text());
+    if (logins.length === 0) return setMessage('warn', 'CSV に取り込める項目がありませんでした。');
+    const d = new Date();
+    const date = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    const groupName = `インポート ${date}`;
+    const { added, skipped } = K.importLogins(db, logins, groupName);
+    const skippedText = skipped > 0 ? `同じ内容の項目がすでにある ${skipped} 件は飛ばしました。` : '';
+    if (added === 0) return setMessage('info', `新しく取り込む項目はありませんでした。${skippedText}`);
+    state.addedSinceSerialize += file.size;
+    markDirty();
+    state.selected = null;
+    state.draft = null;
+    setMessage('warn', `${added} 件を「${groupName}」グループに取り込みました。${skippedText}「保存」を押すまで保管庫には保存されません。取り込んだ CSV ファイルにはパスワードが暗号化されずに書かれているので、削除してください（ごみ箱も空にしてください）。`);
+  } catch (err) {
+    setMessage('error', err instanceof CsvFormatError ? err.message : errorText(err));
   }
 }
 
